@@ -165,6 +165,8 @@ class TCGATask(Dataset):
         else:
             self._samples = self.data[np.array(list(indices_to_load), dtype=int), :]
 
+        self.input_size = self._samples.shape[1]
+
     def __getitem__(self, index):
         sample = self._samples[index, :]
         label = self._labels[index]

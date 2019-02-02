@@ -236,7 +236,7 @@ def _download(data_dir, cancers):
     try:
         os.makedirs(os.path.join(data_dir, 'clinicalMatrices'))
     except OSError as e:
-        if e.errno == os.errno.EEXIST:
+        if e.errno == 17:
             pass
         else:
             raise
@@ -285,6 +285,6 @@ def _download(data_dir, cancers):
                 for sample_id in all_sample_ids:
                     text_file.write('{}\n'.format(sample_id))
 
-    print('Done!')
+        print('Done!')
 
 

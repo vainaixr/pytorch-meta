@@ -165,6 +165,8 @@ class TCGATask(Dataset):
         else:
             self._samples = self.data[np.array(list(indices_to_load), dtype=int), :]
 
+        self.input_size = self._samples.shape[1]
+
     def __getitem__(self, index):
         sample = self._samples[index, :]
         label = self._labels[index]
@@ -234,7 +236,7 @@ def _download(data_dir, cancers):
     try:
         os.makedirs(os.path.join(data_dir, 'clinicalMatrices'))
     except OSError as e:
-        if e.errno == os.errno.EEXIST:
+        if e.errno == 17:
             pass
         else:
             raise
@@ -242,6 +244,7 @@ def _download(data_dir, cancers):
     for cancer in cancers:
         filename = '{}_clinicalMatrix'.format(cancer)
         file_path = os.path.join(data_dir, 'clinicalMatrices', filename)
+        decompressed_file_path = file_path.replace('.gz', '')
 
         if os.path.isfile(file_path):
             continue
@@ -255,9 +258,17 @@ def _download(data_dir, cancers):
 
         with open(file_path, 'wb') as f:
             f.write(data.read())
-        with open(file_path.replace('.gz', ''), 'wb') as out_f, gzip.GzipFile(file_path) as zip_f:
+        with open(decompressed_file_path, 'wb') as out_f, gzip.GzipFile(file_path) as zip_f:
             out_f.write(zip_f.read())
         os.unlink(file_path)
+
+        if os.stat(decompressed_file_path).st_size == 0:
+            os.remove(decompressed_file_path)
+            error = IOError('Downloading {} from {} failed.'.format(filename, url))
+            error.strerror = 'Downloading {} from {} failed.'.format(filename, url)
+            error.errno = 5
+            error.filename = decompressed_file_path
+            raise error
 
     gene_expression_data = os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5')
     if not os.path.isfile(gene_expression_data):
@@ -283,6 +294,6 @@ def _download(data_dir, cancers):
                 for sample_id in all_sample_ids:
                     text_file.write('{}\n'.format(sample_id))
 
-    print('Done!')
+        print('Done!')
 
 

@@ -24,7 +24,7 @@ def classwise_split(dataset, shuffle=True):
     return [data.Subset(dataset, classwise_indices[key]) for key in classwise_indices.keys()]
 
 
-def stratified_split(dataset, lengths):
+def stratified_split(dataset, lengths, min_num_minority=1):
     
     total_length = sum(lengths)
     if total_length != len(dataset):
@@ -37,14 +37,14 @@ def stratified_split(dataset, lengths):
     num_samples_minority = min([len(classwise_dataset) for classwise_dataset in classwise_datasets])
 
     num_splits = len(lengths)
-    if num_samples_minority < num_splits:
+    if num_samples_minority < num_splits*min_num_minority:
         raise ValueError('The dataset can not be split in {} datasets because the minority class only has {} samples.'.format(num_splits, num_samples_minority))
 
     fractions = [(length-num_splits)/(total_length-(num_splits*len(classwise_datasets))) for length in lengths]
 
     class_specific_split_datasets = []
     for classwise_dataset in classwise_datasets:
-        ones = [item for item in [1] for _ in range(num_splits)]
+        ones = [item for item in [min_num_minority] for _ in range(num_splits)]
         first_split = data.random_split(classwise_dataset, [len(classwise_dataset)-num_splits] + ones)
         classwise_dataset = first_split[0]
         class_specific_single_elements = first_split[1:]

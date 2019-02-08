@@ -4,6 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 import h5py
+from collections import Counter
 
 
 class TCGAMeta(Dataset):
@@ -37,12 +38,8 @@ class TCGAMeta(Dataset):
 
                     gene_ids_file = os.path.join(data_dir, 'gene_ids')
                     all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
-                    with open(gene_ids_file, 'r') as file:
-                        gene_ids = file.readlines()
-                        self.gene_ids = [x.strip() for x in gene_ids]
-                    with open(all_sample_ids_file, 'r') as file:
-                        all_sample_ids = file.readlines()
-                        self.all_sample_ids = [x.strip() for x in all_sample_ids]
+                    self.gene_ids = _read_string_list(gene_ids_file)
+                    self.all_sample_ids = _read_string_list(all_sample_ids_file)
 
                     self.preloaded = (self.all_sample_ids, self.gene_ids, self.gene_expression_data)
             except:
@@ -127,13 +124,8 @@ class TCGATask(Dataset):
                 with h5py.File(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5'), 'r') as f:
                     gene_ids_file = os.path.join(data_dir, 'gene_ids')
                     all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
-                    with open(gene_ids_file, 'r') as file:
-                        gene_ids = file.readlines()
-                        self.gene_ids = [x.strip() for x in gene_ids]
-                    with open(all_sample_ids_file, 'r') as file:
-                        all_sample_ids = file.readlines()
-                        self.all_sample_ids = [x.strip() for x in all_sample_ids]
-
+                    self.gene_ids = _read_string_list(gene_ids_file)
+                    self.all_sample_ids = _read_string_list(all_sample_ids_file)
             except:
                 print('TCGA_tissue_ppi.hdf5 could not be read from the data_dir.')
                 sys.exit()
@@ -220,10 +212,16 @@ def get_TCGA_task_ids(data_dir=None, min_samples=3, max_samples=sys.maxsize, tas
 
             task_id = (task_variable, filename.split('_')[0])
 
+            num_samples_per_label = Counter(matrix[task_variable][matrix['sampleID'].isin(task_sample_ids)]) 
+
             num_samples = len(task_sample_ids)
             # only add this task for the specified range of number of samples
-            if min_samples < num_samples < max_samples:
-                task_ids.append(task_id)
+            num_samples_is_in_range = min_samples < num_samples < max_samples
+            if num_samples_is_in_range:
+                # We guarantee that the dataset can be split at least in 3 pieces with stratified sampling
+                minority_is_enough = min(num_samples_per_label.values()) > len(num_samples_per_label) * 3
+                if minority_is_enough:
+                    task_ids.append(task_id)
     return task_ids
 
 
@@ -295,5 +293,13 @@ def _download(data_dir, cancers):
                     text_file.write('{}\n'.format(sample_id))
 
         print('Done!')
+
+
+def _read_string_list(path):
+    with open(path) as f:
+        string_list = f.readlines()
+    # remove whitespace
+    string_list = [x.strip() for x in string_list]
+    return string_list
 
 

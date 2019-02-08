@@ -12,7 +12,7 @@ class TCGAMeta(Dataset):
 
     """
 
-    def __init__(self, data_dir=None, dataset_transform=None, transform=None, target_transform=None, download=False, preload=True):
+    def __init__(self, data_dir=None, dataset_transform=None, transform=None, target_transform=None, download=False, preload=True, min_samples_per_class=3, task_variables_file=None):
         self.dataset_transform = dataset_transform
         self.target_transform = target_transform
         self.transform = transform
@@ -29,7 +29,7 @@ class TCGAMeta(Dataset):
 
             _download(data_dir, cancers)
 
-        self.task_ids = get_TCGA_task_ids()
+        self.task_ids = get_TCGA_task_ids(data_dir, min_samples_per_class, task_variables_file)
 
         if preload:
             try:
@@ -175,7 +175,7 @@ class TCGATask(Dataset):
         return self._samples.shape[0]
 
 
-def get_TCGA_task_ids(data_dir=None, min_samples=3, max_samples=sys.maxsize, task_variables_file=None):
+def get_TCGA_task_ids(data_dir=None, min_samples_per_class=3, task_variables_file=None):
     # specify a default data directory
     if data_dir is None:
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
@@ -212,18 +212,14 @@ def get_TCGA_task_ids(data_dir=None, min_samples=3, max_samples=sys.maxsize, tas
 
             task_id = (task_variable, filename.split('_')[0])
 
-            num_samples_per_label = Counter(matrix[task_variable][matrix['sampleID'].isin(task_sample_ids)]) 
+            num_samples_per_label = Counter(matrix[task_variable][matrix['sampleID'].isin(task_sample_ids)])
 
-            num_samples = len(task_sample_ids)
             # only add this task for the specified range of number of samples
-            num_samples_is_in_range = min_samples < num_samples < max_samples
-            if num_samples_is_in_range:
-                # We guarantee that the dataset can be split at least in 3 pieces with stratified sampling
-                minority_is_enough = min(num_samples_per_label.values()) > len(num_samples_per_label) * 3
-                # And is not a one-class classification in the first place
-                is_not_one_class = len(num_samples_per_label) > 1
-                if minority_is_enough and is_not_one_class:
-                    task_ids.append(task_id)
+            num_samples_per_class_is_in_range = all([num_samples > min_samples_per_class for num_samples in num_samples_per_label.values()])
+            # Make sure this task is not a one-class classification in the first place
+            is_not_one_class = len(num_samples_per_label) > 1
+            if num_samples_per_class_is_in_range and is_not_one_class:
+                task_ids.append(task_id)
     return task_ids
 
 

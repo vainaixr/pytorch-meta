@@ -220,7 +220,9 @@ def get_TCGA_task_ids(data_dir=None, min_samples=3, max_samples=sys.maxsize, tas
             if num_samples_is_in_range:
                 # We guarantee that the dataset can be split at least in 3 pieces with stratified sampling
                 minority_is_enough = min(num_samples_per_label.values()) > len(num_samples_per_label) * 3
-                if minority_is_enough:
+                # And is not a one-class classification in the first place
+                is_not_one_class = len(num_samples_per_label) > 1
+                if minority_is_enough and is_not_one_class:
                     task_ids.append(task_id)
     return task_ids
 

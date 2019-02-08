@@ -28,28 +28,38 @@ def stratified_split(dataset, lengths):
     
     total_length = sum(lengths)
     if total_length != len(dataset):
-        raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
+        raise ValueError("Sum of input lengths does not equal the length of the input dataset.")
 
-    fractions = [length/total_length for length in lengths]
+    if any([length <= 0 for length in lengths]):
+        raise ValueError("Any dataset needs to have a length greater zero.")
 
     classwise_datasets = classwise_split(dataset, shuffle=True)
-    classwise_datasets = sorted(classwise_datasets, key=lambda dataset: len(dataset))
-    num_samples_minority = len(classwise_datasets[0])
+    num_samples_minority = min([len(classwise_dataset) for classwise_dataset in classwise_datasets])
 
     num_splits = len(lengths)
     if num_samples_minority < num_splits:
         raise ValueError('The dataset can not be split in {} datasets because the minority class only has {} samples.'.format(num_splits, num_samples_minority))
-    
-    class_specific_split_datasets = []
-    for dataset in classwise_datasets:
-        class_specific_lengths = []
-        for fraction in fractions:
-            class_specific_lengths.append(int(round(len(dataset) * fraction)))
 
-        class_specific_split_datasets.append(data.random_split(dataset, class_specific_lengths))
+    fractions = [(length-num_splits)/(total_length-(num_splits*len(classwise_datasets))) for length in lengths]
+
+    class_specific_split_datasets = []
+    for classwise_dataset in classwise_datasets:
+        ones = [item for item in [1] for _ in range(num_splits)]
+        first_split = data.random_split(classwise_dataset, [len(classwise_dataset)-num_splits] + ones)
+        classwise_dataset = first_split[0]
+        class_specific_single_elements = first_split[1:]
+
+        class_specific_lengths = []
+        for fraction in fractions[:-1]:
+            class_specific_lengths.append(int(round(len(classwise_dataset) * fraction)))
+        class_specific_lengths.append(len(classwise_dataset)-sum(class_specific_lengths))
+
+        second_split = data.random_split(classwise_dataset, class_specific_lengths)
+        rejoined_datasets = [data.ConcatDataset([first, second]) for first, second in zip(class_specific_single_elements, second_split)]
+        class_specific_split_datasets.append(rejoined_datasets)
         
     datasets = []
-    for i in range(len(fractions)):
+    for i in range(num_splits):
         datasets.append(data.ConcatDataset([class_specific_dataset[i] for class_specific_dataset in class_specific_split_datasets]))
     return datasets 
 

@@ -24,6 +24,7 @@ def nostdout():
     finally:
         sys.stdout = save_stdout
 
+
 class TestDatasets(unittest.TestCase):
 
     def setUp(self):
@@ -113,14 +114,39 @@ class TestUtil(unittest.TestCase):
         pass
 
     def test_stratified_sampling(self):
-        dataset = DummyDataset([1000,2])
+        dataset = DummyDataset([1000, 2])
 
-        lenghts = [500,502]
+        lenghts = [500, 502]
         datasets = utils.stratified_split(dataset, lenghts)
-        
+
         for dataset in datasets:
             _, label = dataset.__getitem__(len(dataset)-1)
             self.assertEquals(label, 1)
+
+    def test_stratified_sampling_TCGA(self):
+        metadataset = TCGA.TCGAMeta(download=True)
+
+        third_size = 10
+        samples = 10
+        for dataset in metadataset:
+            for i in range(dataset.num_classes + third_size, len(dataset) - dataset.num_classes - third_size, len(dataset) // samples):
+                length_minority_set = i
+
+                lengths = [length_minority_set - third_size, len(dataset) - length_minority_set - third_size,
+                           2 * third_size]
+
+                sets = utils.stratified_split(dataset, lengths)
+
+                all_labels = [[label for _, label in dataset] for dataset in sets]
+                classes = list(set([label for labels in all_labels for label in labels]))
+                contains_samples_for_all_classes = all(
+                    [[class_name in label_list for label_list in all_labels] for class_name in classes])
+
+                self.assertTrue(contains_samples_for_all_classes)
+
+                matches_lenghts = [len(dataset) == length for dataset, length in zip(sets, lengths)]
+
+                self.assertTrue(matches_lenghts)
 
 
 if __name__ == '__main__':

@@ -6,9 +6,10 @@ import shutil
 import torch
 import h5py
 import time
+import collections
 
-import TCGA
-import utils
+from . import TCGA
+from . import utils
 
 
 class DummyFile(object):
@@ -103,7 +104,7 @@ class DummyDataset(torch.utils.data.Dataset):
             self.labels += [label for _ in range(num)]  
     
     def __getitem__(self, index):
-       return None, self.labels[index]
+        return None, self.labels[index]
     
     def __len__(self):
         return len(self.labels)
@@ -127,9 +128,9 @@ class TestUtil(unittest.TestCase):
         metadataset = TCGA.TCGAMeta(download=True)
 
         third_size = 10
-        samples = 10
+        samples = 5
         for dataset in metadataset:
-            for i in range(dataset.num_classes + third_size, len(dataset) - dataset.num_classes - third_size, len(dataset) // samples):
+            for i in range(dataset.num_classes + third_size, len(dataset) - dataset.num_classes - third_size, max(1,len(dataset) // samples)):
                 length_minority_set = i
 
                 lengths = [length_minority_set - third_size, len(dataset) - length_minority_set - third_size,
@@ -144,10 +145,48 @@ class TestUtil(unittest.TestCase):
 
                 self.assertTrue(contains_samples_for_all_classes)
 
-                matches_lenghts = [len(dataset) == length for dataset, length in zip(sets, lengths)]
+                matches_lengths = all([len(dataset) == length for dataset, length in zip(sets, lengths)])
 
-                self.assertTrue(matches_lenghts)
+                self.assertTrue(matches_lengths)
 
+    def test_stratified_sampling_div_zero_edgecase(self):
+        whole_dataset = DummyDataset([20, 20, 20])
+        lengths = [15, 15, 15, 15]
+        sets = utils.stratified_split(whole_dataset, lengths, min_num_minority=5)
+
+        all_labels = [[label for _, label in dataset] for dataset in sets]
+        counters = [collections.Counter(labels) for labels in all_labels]
+
+        contains_samples_for_all_classes = all([counter == {0: 5, 1: 5, 2: 5} for counter in counters])
+        self.assertTrue(contains_samples_for_all_classes)
+
+        matches_lengths = all([len(dataset) == length for dataset, length in zip(sets, lengths)])
+        self.assertTrue(matches_lengths)
+
+    def test_stratified_sampling_min_zero_edgecase(self):
+        whole_dataset = DummyDataset([580, 23, 30, 19, 34, 33, 52, 19, 20])
+        lengths = [574, 53, 31, 91, 27, 34]
+        sets = utils.stratified_split(whole_dataset, lengths, min_num_minority=0)
+
+        all_labels = [[label for _, label in dataset] for dataset in sets]
+        counters = [collections.Counter(labels) for labels in all_labels]
+
+        matches_lengths = all([len(dataset) == length for dataset, length in zip(sets, lengths)])
+        self.assertTrue(matches_lengths)
+
+    def test_stratified_sampling_higher_min(self):
+        whole_dataset = DummyDataset([10000, 20, 20])
+        lengths = [9995, 15, 15, 15]
+        sets = utils.stratified_split(whole_dataset, lengths, min_num_minority=5)
+
+        all_labels = [[label for _, label in dataset] for dataset in sets]
+        counters = [collections.Counter(labels) for labels in all_labels]
+
+        contains_samples_for_all_classes = all([counter == {0: 5, 1: 5, 2: 5} for counter in counters[1:]])
+        self.assertTrue(contains_samples_for_all_classes)
+
+        matches_lengths = all([len(dataset) == length for dataset, length in zip(sets, lengths)])
+        self.assertTrue(matches_lengths)
 
 if __name__ == '__main__':
     unittest.main()

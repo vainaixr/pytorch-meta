@@ -96,7 +96,7 @@ class TCGAMeta(Dataset):
         """
         dataset = TCGATask(self.task_ids[index], transform=self.transform, target_transform=self.target_transform, download=False, preloaded=self.preloaded)
 
-        if self.target_transform is not None:
+        if self.dataset_transform is not None:
             dataset = self.dataset_transform(dataset)
         return dataset
 

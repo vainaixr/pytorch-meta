@@ -120,15 +120,14 @@ class TCGATask(Dataset):
             _download(data_dir, [cancer])
 
         if preloaded is None:
-            try:
-                with h5py.File(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5'), 'r') as f:
-                    gene_ids_file = os.path.join(data_dir, 'gene_ids')
-                    all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
-                    self.gene_ids = _read_string_list(gene_ids_file)
-                    self._all_sample_ids = _read_string_list(all_sample_ids_file)
-            except:
-                print('TCGA_tissue_ppi.hdf5 could not be read from the data_dir.')
-                sys.exit()
+            gene_ids_file = os.path.join(data_dir, 'gene_ids')
+            all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
+
+            if not(os.path.isfile(gene_ids_file) and os.path.isfile(all_sample_ids_file)):
+                raise ValueError('Preprocessed gene_ids and sample_ids list where not found in {}.'.format(data_dir))
+
+            self.gene_ids = _read_string_list(gene_ids_file)
+            self._all_sample_ids = _read_string_list(all_sample_ids_file)
         else:
             self._all_sample_ids, self.gene_ids, self._data = preloaded
 
@@ -148,7 +147,8 @@ class TCGATask(Dataset):
         self.num_classes = len(self.categories)
 
         # generator to retrieve the specific indices we need
-        indices_to_load = (sample_ids.index(sample_id) for sample_id in sample_ids)
+        indices_to_load = [self._all_sample_ids.index(sample_id) for sample_id in sample_ids]
+        indices_to_load, self._labels = zip(*sorted(zip(indices_to_load, self._labels)))
 
         # lazy loading or loading from preloaded data if available
         if preloaded is None:

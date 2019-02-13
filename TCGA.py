@@ -125,12 +125,12 @@ class TCGATask(Dataset):
                     gene_ids_file = os.path.join(data_dir, 'gene_ids')
                     all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
                     self.gene_ids = _read_string_list(gene_ids_file)
-                    self.all_sample_ids = _read_string_list(all_sample_ids_file)
+                    self._all_sample_ids = _read_string_list(all_sample_ids_file)
             except:
                 print('TCGA_tissue_ppi.hdf5 could not be read from the data_dir.')
                 sys.exit()
         else:
-            self.all_sample_ids, self.gene_ids, self.data = preloaded
+            self._all_sample_ids, self.gene_ids, self._data = preloaded
 
         # load the cancer specific matrix
         matrix = pd.read_csv(os.path.join(data_dir, 'clinicalMatrices', cancer + '_clinicalMatrix'), delimiter='\t')
@@ -140,7 +140,7 @@ class TCGATask(Dataset):
         attribute = matrix[task_variable]
 
         # filter all elements where the clinical variable is not available or the associated gene expression data
-        available_elements = attribute.notnull() & matrix['sampleID'].isin(self.all_sample_ids)
+        available_elements = attribute.notnull() & matrix['sampleID'].isin(self._all_sample_ids)
         sample_ids = ids[available_elements].tolist()
         filtered_attribute = attribute[available_elements].astype('category').cat
         self._labels = filtered_attribute.codes.tolist()
@@ -155,7 +155,7 @@ class TCGATask(Dataset):
             with h5py.File(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5'), 'r') as f:
                 self._samples = f['expression_data'][indices_to_load, :]
         else:
-            self._samples = self.data[np.array(list(indices_to_load), dtype=int), :]
+            self._samples = self._data[np.array(list(indices_to_load), dtype=int), :]
 
         self.input_size = self._samples.shape[1]
 

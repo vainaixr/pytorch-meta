@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import h5py
 from collections import Counter
+from data.utils import symbol_map
 
 
 class TCGAMeta(Dataset):
@@ -33,15 +34,12 @@ class TCGAMeta(Dataset):
 
         if preload:
             try:
-                with h5py.File(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5'), 'r') as f:
-                    self.gene_expression_data = f['expression_data'][()]
-
-                    gene_ids_file = os.path.join(data_dir, 'gene_ids')
-                    all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
-                    self.gene_ids = _read_string_list(gene_ids_file)
-                    self.all_sample_ids = _read_string_list(all_sample_ids_file)
-
-                    self.preloaded = (self.all_sample_ids, self.gene_ids, self.gene_expression_data)
+                self.gene_expression_data = pd.read_hdf(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5')).values
+                gene_ids_file = os.path.join(data_dir, 'gene_ids')
+                all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
+                self.gene_ids = _read_string_list(gene_ids_file)
+                self.all_sample_ids = _read_string_list(all_sample_ids_file)
+                self.preloaded = (self.all_sample_ids, self.gene_ids, self.gene_expression_data)
             except:
                 print('TCGA_tissue_ppi.hdf5 could not be read from the data_dir.')
                 sys.exit()
@@ -181,8 +179,8 @@ def get_TCGA_task_ids(data_dir=None, min_samples_per_class=3, task_variables_fil
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
 
     try:
-        with h5py.File(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5'), 'r') as f:
-            all_sample_ids = [x.decode('utf-8') for x in f['sample_names']]
+        df = pd.read_hdf(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5'))
+        all_sample_ids = df.index.values.tolist()
     except:
         print('TCGA_tissue_ppi.hdf5 could not be read from the data_dir.')
         sys.exit()
@@ -267,19 +265,30 @@ def _download(data_dir, cancers):
             raise error
 
     gene_expression_data = os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5')
+    hdf_file = os.path.join(data_dir, "TCGA_tissue_ppi.hdf5")
+    csv_file = os.path.join(data_dir, 'HiSeqV2.gz')
+
     if not os.path.isfile(gene_expression_data):
         print('Downloading TCGA_tissue_ppi.hdf5 using academictorrents')
-        at.get("4070a45bc7dd69584f33e86ce193a2c903f0776d", datastore=data_dir)
+        at.get("e4081b995625f9fc599ad860138acf7b6eb1cf6f", datastore=data_dir)
+        if not os.path.isfile(hdf_file) and os.path.isfile(csv_file):
+            print("We are converting a CSV dataset of TCGA to HDF5. Please wait a minute, this only happens the first time you use the TCGA dataset.")
+            df = pd.read_csv(csv_file, compression="gzip", sep="\t")
+            df = df.transpose()
+            df.columns = df.iloc[0]
+            df = df.drop(df.index[0])
+            df = df.astype(float)
+            df.to_hdf(hdf_file, key="data", complevel=5)
 
     gene_ids_file = os.path.join(data_dir, 'gene_ids')
     all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
+    df = pd.read_hdf(hdf_file)
+    df.rename(symbol_map(df.columns), axis="columns", inplace=True)
 
     if not os.path.isfile(gene_ids_file):
         print('Processing...')
-
-        with h5py.File(gene_expression_data, 'r') as f:
-            gene_ids = [x.decode('utf-8') for x in f['gene_names']]
-            all_sample_ids = [x.decode('utf-8') for x in f['sample_names']]
+        gene_ids = df.columns.values.tolist()
+        all_sample_ids = df.index.values.tolist()
 
         with open(gene_ids_file, "w") as text_file:
             for gene_id in gene_ids:
@@ -299,5 +308,3 @@ def _read_string_list(path):
     # remove whitespace
     string_list = [x.strip() for x in string_list]
     return string_list
-
-

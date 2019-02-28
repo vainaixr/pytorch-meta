@@ -34,7 +34,10 @@ class TCGAMeta(Dataset):
 
         if preload:
             try:
-                self.gene_expression_data = pd.read_hdf(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5')).values
+                hdf_file = os.path.join(data_dir, "TCGA_tissue_ppi.hdf5")
+                f = h5py.File(hdf_file)
+                self.gene_expression_data = f['dataset'][:]
+                f.close()
                 gene_ids_file = os.path.join(data_dir, 'gene_ids')
                 all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
                 self.gene_ids = _read_string_list(gene_ids_file)
@@ -150,8 +153,9 @@ class TCGATask(Dataset):
 
         # lazy loading or loading from preloaded data if available
         if preloaded is None:
-            with h5py.File(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5'), 'r') as f:
-                self._samples = f['expression_data'][indices_to_load, :]
+            hdf_file = os.path.join(data_dir, "TCGA_tissue_ppi.hdf5")
+            with h5py.File(hdf_file) as f:
+                self._samples = f['dataset'][indices_to_load, :]
         else:
             self._samples = self._data[np.array(list(indices_to_load), dtype=int), :]
 
@@ -179,8 +183,8 @@ def get_TCGA_task_ids(data_dir=None, min_samples_per_class=3, task_variables_fil
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
 
     try:
-        df = pd.read_hdf(os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5'))
-        all_sample_ids = df.index.values.tolist()
+        all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
+        all_sample_ids = _read_string_list(all_sample_ids_file)
     except:
         print('TCGA_tissue_ppi.hdf5 could not be read from the data_dir.')
         sys.exit()
@@ -264,11 +268,12 @@ def _download(data_dir, cancers):
             error.filename = decompressed_file_path
             raise error
 
-    gene_expression_data = os.path.join(data_dir, 'TCGA_tissue_ppi.hdf5')
     hdf_file = os.path.join(data_dir, "TCGA_tissue_ppi.hdf5")
     csv_file = os.path.join(data_dir, 'HiSeqV2.gz')
+    gene_ids_file = os.path.join(data_dir, 'gene_ids')
+    all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
 
-    if not os.path.isfile(gene_expression_data):
+    if not os.path.isfile(hdf_file):
         print('Downloading TCGA_tissue_ppi.hdf5 using academictorrents')
         at.get("e4081b995625f9fc599ad860138acf7b6eb1cf6f", datastore=data_dir)
         if not os.path.isfile(hdf_file) and os.path.isfile(csv_file):
@@ -278,28 +283,19 @@ def _download(data_dir, cancers):
             df.columns = df.iloc[0]
             df = df.drop(df.index[0])
             df = df.astype(float)
-            df.to_hdf(hdf_file, key="data", complevel=5)
-
-    gene_ids_file = os.path.join(data_dir, 'gene_ids')
-    all_sample_ids_file = os.path.join(data_dir, 'all_sample_ids')
-    df = pd.read_hdf(hdf_file)
-    df.rename(symbol_map(df.columns), axis="columns", inplace=True)
-
-    if not os.path.isfile(gene_ids_file):
-        print('Processing...')
-        gene_ids = df.columns.values.tolist()
-        all_sample_ids = df.index.values.tolist()
-
-        with open(gene_ids_file, "w") as text_file:
-            for gene_id in gene_ids:
-                text_file.write('{}\n'.format(gene_id))
-
-        if not os.path.isfile(all_sample_ids_file):
+            df.rename(symbol_map(df.columns), axis="columns", inplace=True)
+            gene_ids = df.columns.values.tolist()
+            all_sample_ids = df.index.values.tolist()
+            with open(gene_ids_file, "w") as text_file:
+                for gene_id in gene_ids:
+                    text_file.write('{}\n'.format(gene_id))
             with open(all_sample_ids_file, "w") as text_file:
                 for sample_id in all_sample_ids:
                     text_file.write('{}\n'.format(sample_id))
 
-        print('Done!')
+            f = h5py.File(hdf_file)
+            f.create_dataset("dataset", data=df.values)
+            f.close()
 
 
 def _read_string_list(path):

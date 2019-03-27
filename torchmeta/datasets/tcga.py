@@ -23,12 +23,14 @@ class TCGA(MetaDataset):
     _cancers = None
 
     def __init__(self, root, meta_train=True, min_samples_per_class=3,
+                 max_samples_per_task=float('Inf'),
                  transform=None, target_transform=None, dataset_transform=None,
-                 download=False, chunksize=100, preload=True):
+                 download=False, chunksize=100, preload=True, blacklist=None):
         super(TCGA, self).__init__(dataset_transform=dataset_transform)
         self.root = os.path.join(os.path.expanduser(root), self.folder)
         self.meta_train = meta_train
         self.min_samples_per_class = min_samples_per_class
+        self.max_samples_per_task = max_samples_per_task
 
         self.transform = transform
         self.target_transform = target_transform
@@ -46,6 +48,10 @@ class TCGA(MetaDataset):
             self.preloaded = True
 
         self.task_ids = self.get_task_ids()
+
+        if blacklist is None:
+            blacklist = set()
+        self.blacklist = blacklist
 
     def __len__(self):
         return len(self.task_ids)
@@ -105,11 +111,24 @@ class TCGA(MetaDataset):
         dataframe = pd.read_csv(filename, sep='\t', index_col=0, header=0)
         labels = dataframe[label].dropna().astype('category')
 
-        if self.gene_expression_file is not None:
-            data = self.gene_expression_data[labels.index]
+        if not self.meta_train:
+            labels = labels.drop(self.blacklist, errors='ignore')
+
+        if len(labels) > self.max_samples_per_task:
+            labels = labels.sample(n=self.max_samples_per_task, random_state=1)
+            labels = labels.sort_index()
+
+        if self.meta_train:
+            self.blacklist.update(labels.index)
+
+        if len(labels) > 0:
+            if self.gene_expression_file is not None:
+                data = self.gene_expression_data[labels.index]
+            else:
+                with h5py.File(self.gene_expression_path, 'r') as f:
+                    data = f['expression_data'][labels.index]
         else:
-            with h5py.File(self.gene_expression_path, 'r') as f:
-                data = f['expression_data'][labels.index]
+            data = None
                 
         task = TCGATask((label, cancer), data, labels.cat.codes.tolist(),
             labels.cat.categories.tolist(), transform=self.transform,
@@ -141,7 +160,7 @@ class TCGA(MetaDataset):
 
             if not os.path.isfile(processed):
                 raw_df = pd.read_csv(filepath, sep='\t', index_col=0, header=0,
-                    usecols=col_in_task_variables)#.dropna(axis=0, how='any')
+                    usecols=col_in_task_variables)
                 dataframe = raw_df[raw_df.index.isin(self.all_sample_ids)]
                 dataframe.index = dataframe.index.map(lambda index: self.all_sample_ids[index])
                 dataframe.index.names = ['index']
@@ -285,6 +304,10 @@ class TCGATask(Task):
 
     def __len__(self):
         return len(self.labels)
+
+    def __iter__(self):
+        for index in range(len(self)):
+            yield self[index]
 
     def __getitem__(self, index):
         sample = self.data[index]

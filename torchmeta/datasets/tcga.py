@@ -105,7 +105,7 @@ def split_tcga(tcga_metadataset, counts):
     tcga_metadatasets = []
     tcga_metadataset.close()
     for metadataset in expanded_metadatasets:
-        current_tcga_metadataset = copy.deepcopy(tcga_metadataset)
+        current_tcga_metadataset = copy.copy(tcga_metadataset)
         current_tcga_metadataset.task_ids = metadataset
         current_tcga_metadataset.open()
         tcga_metadatasets.append(current_tcga_metadataset)

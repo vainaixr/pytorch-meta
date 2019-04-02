@@ -134,14 +134,12 @@ class TCGA(MetaDataset):
     _cancers = None
 
     def __init__(self, root, meta_train=True, min_samples_per_class=3,
-                 max_samples_per_task=float('Inf'),
                  transform=None, target_transform=None, dataset_transform=None,
                  download=False, chunksize=100, preload=True):
         super(TCGA, self).__init__(dataset_transform=dataset_transform)
         self.root = os.path.join(os.path.expanduser(root), self.folder)
         self.meta_train = meta_train
         self.min_samples_per_class = min_samples_per_class
-        self.max_samples_per_task = max_samples_per_task
 
         self.transform = transform
         self.target_transform = target_transform

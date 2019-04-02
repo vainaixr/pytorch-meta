@@ -1,16 +1,125 @@
 import os
 import json
 import h5py
+import numpy as np
+import torch
+import copy
 
 from torchmeta.dataset import MetaDataset
 from torchmeta.tasks import Task
 from torchmeta.datasets.utils import get_asset
 
+
+def _assign_samples(tcga_metadataset):
+    import pandas as pd
+    import munkres
+
+    blacklist = []
+    sample_to_task_assignment = {}
+    for cancer in get_cancers():
+        filename = tcga_metadataset.get_processed_filename(cancer)
+        dataframe = pd.read_csv(filename, sep='\t', index_col=0, header=0)
+        dataframe = dataframe.drop(blacklist, errors='ignore')
+        permutation = dataframe.index[torch.randperm(len(dataframe.index))]
+        dataframe = dataframe.reindex(permutation)
+        labels = dataframe.notna()
+        labels = labels.applymap(lambda x: 1. if x else munkres.DISALLOWED)
+        all_disallowed = labels.apply(lambda x: True if all(x == munkres.DISALLOWED) else False, axis=1)
+        labels = labels.drop(labels[all_disallowed].index)
+
+        matrix = labels.values
+        shape = matrix.shape
+        # The +5 allows for some slack in the assignment
+        # which is necessary for the used implementation to converge on BRCA
+        repeats = np.int(np.ceil(shape[0] / shape[1])) + 5
+        expanded_matrix = np.tile(matrix, (1, repeats))
+
+        indices = munkres.Munkres().compute(expanded_matrix)
+        mapped_indices = [(a, b % shape[1]) for a, b in indices]
+
+        for index, mapped_index in mapped_indices:
+            sample_to_task_assignment.setdefault((dataframe.columns[mapped_index], cancer), []).append(
+                dataframe.index[index])
+
+        blacklist.extend(dataframe.index.tolist())
+
+    return sample_to_task_assignment
+
+
+def _expand_sample_usage(meta_dataset, all_allowed_samples, additional_samples):
+    expanded_metadataset = {}
+    all_samples_of_metadataset = set()
+    for key, value in meta_dataset.items():
+        all_samples_of_metadataset.update(value)
+    all_samples_of_metadataset.update(additional_samples)
+
+    used_additional_samples = set()
+    for key in meta_dataset.keys():
+        allowed_samples = set(all_allowed_samples[key])
+        intersection = allowed_samples.intersection(all_samples_of_metadataset)
+        expanded_metadataset[key] = list(intersection)
+        used_additional_samples = additional_samples.intersection(intersection)
+
+    return expanded_metadataset, used_additional_samples
+
+
+def split_tcga(tcga_metadataset, counts):
+
+    all_allowed_samples = tcga_metadataset.task_ids
+
+    # We first uniquely assing every sample to a task
+    sample_to_task_assignment = _assign_samples(tcga_metadataset)
+
+    keys = [i for i in all_allowed_samples.keys()]
+    difference = set(sample_to_task_assignment.keys()).difference(set(keys))
+
+    unassigned_samples = set()
+    for key in difference:
+        unassigned_samples.update(sample_to_task_assignment[key])
+
+    # Second we split the metadataset
+    # with a torch-based random sample
+    permutation = torch.randperm(len(keys)).numpy()
+
+    metadatasets = []
+    start = 0
+    end = 0
+    for count in counts:
+        end += count
+        current_keys = [keys[index] for index in permutation[start:end]]
+        metadatasets.append({key: sample_to_task_assignment[key] for key in current_keys})
+        start = count
+
+    expanded_metadatasets = [None] * len(metadatasets)
+    order = np.argsort([len(metadataset) for metadataset in metadatasets])
+
+    # Finally we expand the tasks by reusing samples wherever possible in the sets
+    blacklist = set()
+    for i in order:
+        additional_samples = unassigned_samples.difference(blacklist)
+        expanded_metadataset, used_additional_samples = _expand_sample_usage(metadatasets[i], all_allowed_samples,
+                                                                            additional_samples)
+        expanded_metadatasets[i] = (expanded_metadataset)
+        blacklist.update(used_additional_samples)
+
+    tcga_metadatasets = []
+    tcga_metadataset.close()
+    for metadataset in expanded_metadatasets:
+        current_tcga_metadataset = copy.deepcopy(tcga_metadataset)
+        current_tcga_metadataset.task_ids = metadataset
+        current_tcga_metadataset.open()
+        tcga_metadatasets.append(current_tcga_metadataset)
+
+    return tcga_metadatasets
+
+
 def get_cancers():
     return get_asset(TCGA.folder, 'cancers.json', dtype='json')
 
+
 def get_task_variables():
     return get_asset(TCGA.folder, 'task_variables.json', dtype='json')
+
 
 class TCGA(MetaDataset):
     folder = 'tcga'
@@ -25,7 +134,7 @@ class TCGA(MetaDataset):
     def __init__(self, root, meta_train=True, min_samples_per_class=3,
                  max_samples_per_task=float('Inf'),
                  transform=None, target_transform=None, dataset_transform=None,
-                 download=False, chunksize=100, preload=True, blacklist=None):
+                 download=False, chunksize=100, preload=True):
         super(TCGA, self).__init__(dataset_transform=dataset_transform)
         self.root = os.path.join(os.path.expanduser(root), self.folder)
         self.meta_train = meta_train
@@ -48,10 +157,6 @@ class TCGA(MetaDataset):
             self.preloaded = True
 
         self.task_ids = self.get_task_ids()
-
-        if blacklist is None:
-            blacklist = set()
-        self.blacklist = blacklist
 
     def __len__(self):
         return len(self.task_ids)
@@ -106,29 +211,20 @@ class TCGA(MetaDataset):
 
     def __getitem__(self, index):
         import pandas as pd
-        label, cancer = self.task_ids[index]
+
+        label, cancer = list(self.task_ids.keys())[index]
         filename = self.get_processed_filename(cancer)
         dataframe = pd.read_csv(filename, sep='\t', index_col=0, header=0)
         labels = dataframe[label].dropna().astype('category')
 
-        if not self.meta_train:
-            labels = labels.drop(self.blacklist, errors='ignore')
+        labels = labels[list(self.task_ids.values())[index]]
+        labels = labels.sort_index()
 
-        if len(labels) > self.max_samples_per_task:
-            labels = labels.sample(n=self.max_samples_per_task, random_state=1)
-            labels = labels.sort_index()
-
-        if self.meta_train:
-            self.blacklist.update(labels.index)
-
-        if len(labels) > 0:
-            if self.gene_expression_file is not None:
-                data = self.gene_expression_data[labels.index]
-            else:
-                with h5py.File(self.gene_expression_path, 'r') as f:
-                    data = f['expression_data'][labels.index]
+        if self.gene_expression_file is not None:
+            data = self.gene_expression_data[labels.index]
         else:
-            data = None
+            with h5py.File(self.gene_expression_path, 'r') as f:
+                data = f['expression_data'][labels.index]
                 
         task = TCGATask((label, cancer), data, labels.cat.codes.tolist(),
             labels.cat.categories.tolist(), transform=self.transform,
@@ -152,7 +248,7 @@ class TCGA(MetaDataset):
 
         col_in_task_variables = lambda col: (col == 'sampleID') or (col in self.task_variables)
 
-        task_ids = []
+        samples_for_tasks = {}
         for cancer in self.cancers:
             filename = self.clinical_matrix_filename.format(cancer)
             filepath = os.path.join(clinical_matrices_folder, '{0}.tsv'.format(filename))
@@ -174,9 +270,10 @@ class TCGA(MetaDataset):
             count_classes = num_samples_per_label.count(axis=0)
             labels = min_samples_per_class[(min_samples_per_class > self.min_samples_per_class) & (count_classes > 1)]
 
-            task_ids.extend([(label, cancer) for label in labels.index])
+            for label in labels.index:
+                samples_for_tasks[(label, cancer)] = dataframe[dataframe[label].notnull()].index.tolist()
 
-        return task_ids
+        return samples_for_tasks
 
     def download(self, chunksize=100):
         import gzip
@@ -259,6 +356,10 @@ class TCGA(MetaDataset):
             self.gene_expression_file = None
             self.preloaded = False
 
+    def open(self):
+        if self.preloaded:
+            self._preload_gene_expression_data()
+            self.preloaded = True
 
 class TCGATask(Task):
     @classmethod

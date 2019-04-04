@@ -88,7 +88,7 @@ def split_tcga(tcga_metadataset, counts):
         end += count
         current_keys = [keys[index] for index in permutation[start:end]]
         metadatasets.append({key: sample_to_task_assignment[key] for key in current_keys})
-        start = count
+        start = end
 
     expanded_metadatasets = [None] * len(metadatasets)
     order = np.argsort([len(metadataset) for metadataset in metadatasets])

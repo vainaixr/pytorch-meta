@@ -9,7 +9,6 @@ from torchmeta.dataset import MetaDataset
 from torchmeta.tasks import Task
 from torchmeta.datasets.utils import get_asset
 
-
 def _assign_samples(tcga_metadataset):
     import pandas as pd
     import munkres
@@ -63,11 +62,11 @@ def _expand_sample_usage(meta_dataset, all_allowed_samples, additional_samples):
     return expanded_metadataset, used_additional_samples
 
 
-def split_tcga(tcga_metadataset, counts):
+def split_tcga(tcga_metadataset, counts, min_num_samples_per_class):
 
     all_allowed_samples = tcga_metadataset.task_ids
 
-    # We first uniquely assing every sample to a task
+    # We first uniquely assign every sample to a task
     sample_to_task_assignment = _assign_samples(tcga_metadataset)
 
     keys = [i for i in all_allowed_samples.keys()]
@@ -81,6 +80,7 @@ def split_tcga(tcga_metadataset, counts):
     # with a torch-based random sample
     permutation = torch.randperm(len(keys)).numpy()
 
+    # metadataset split
     metadatasets = []
     start = 0
     end = 0
@@ -112,6 +112,38 @@ def split_tcga(tcga_metadataset, counts):
             current_tcga_metadataset.open()
         tcga_metadatasets.append(current_tcga_metadataset)
 
+    # tcga_metadataset: the whole dataset of tasks, size = 153 tasks
+    # tcga_metadatasets: the split of meta-train, meta_valid and meta_test, size = 3
+
+    # to check if the number of samples from each class in train and test set are greater than or equal to min_num_samples_per_class
+    for metadataset in tcga_metadatasets:
+        valid_task_ids = []
+        for task in metadataset:
+            classes = {}
+            train, test, num_classes, task_id = task
+            dataset = torch.utils.data.ConcatDataset([train, test])
+
+            for index in range(len(dataset)):
+                _, label = dataset.__getitem__(index)
+
+                for cl in range(num_classes):
+                    if cl not in classes.keys():
+                        classes[cl] = 0
+                    if label == cl:
+                        classes[label] += 1
+            # classes_test = {}
+            # for index in range(len(test)):
+            #     _, label = test.__getitem__(index)
+            #     for cl in range(num_classes):
+            #         if cl not in classes_test.keys():
+            #             classes_test[cl] = 0
+            #         if label == cl:
+            #             classes_test[label] += 1
+            if all(np.greater_equal(np.fromiter(classes.values(), dtype=float), min_num_samples_per_class)):
+                valid_task_ids.append(task_id)
+
+        metadataset.task_ids = {key: metadataset.task_ids[key] for key in metadataset.task_ids.keys() if key in valid_task_ids}
+
     return tcga_metadatasets
 
 
@@ -133,13 +165,13 @@ class TCGA(MetaDataset):
     _task_variables = None
     _cancers = None
 
-    def __init__(self, root, meta_train=True, min_samples_per_class=3,
+    def __init__(self, root, meta_train=True, min_num_samples_per_class=3,
                  transform=None, target_transform=None, dataset_transform=None,
                  download=False, chunksize=100, preload=True):
         super(TCGA, self).__init__(dataset_transform=dataset_transform)
         self.root = os.path.join(os.path.expanduser(root), self.folder)
         self.meta_train = meta_train
-        self.min_samples_per_class = min_samples_per_class
+        self.min_samples_per_class = min_num_samples_per_class
 
         self.transform = transform
         self.target_transform = target_transform
@@ -422,3 +454,4 @@ class TCGATask(Task):
             target = self.target_transform(target)
 
         return (sample, target)
+
